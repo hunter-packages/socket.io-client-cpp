@@ -1,84 +1,113 @@
 cmake_minimum_required(VERSION 3.1.0 FATAL_ERROR)
-PROJECT(sioclient)
+include(cmake/HunterGate.cmake)
+HunterGate(
+    URL "https://github.com/ruslo/hunter/archive/v0.23.125.tar.gz"
+    SHA1 "458d4ffb3e62c86322943baf5b94a3a21a6b9397"
+    LOCAL
+)
 
-option(BUILD_SHARED_LIBS "Build the shared library" OFF)
-option(Boost_USE_STATIC_LIBS "Use Boost static version" ON)
 
 set(MAJOR 1)
 set(MINOR 6)
-set(PATCH 0)
+set(PATCH 1)
+set(VERSION "${MAJOR}.${MINOR}.${PATCH}")
 
-if(NOT CMAKE_BUILD_TYPE )
-MESSAGE(STATUS "not define build type, set to release" )
-set(CMAKE_BUILD_TYPE Release )
-elseif(NOT (${CMAKE_BUILD_TYPE} STREQUAL "Release" OR ${CMAKE_BUILD_TYPE} STREQUAL "Debug" ))
-MESSAGE(SEND_ERROR "CMAKE_BUILD_TYPE must be either Release or Debug")
-return()
-endif()
+PROJECT(SocketIOClient VERSION "${VERSION}")
 
-set(BOOST_VER "1.55.0" CACHE STRING "boost version" )
+if (NOT CMAKE_CXX_STANDARD)
+    set(CMAKE_CXX_STANDARD 11)
+endif ()
 
-set(Boost_USE_MULTITHREADED ON) 
-set(Boost_USE_STATIC_RUNTIME OFF) 
-find_package(Boost ${BOOST_VER} REQUIRED COMPONENTS system date_time random) 
+hunter_add_package(OpenSSL)
+hunter_add_package(Boost COMPONENTS system date_time random)
+hunter_add_package(RapidJSON)
+hunter_add_package(websocketpp)
+
+find_package(OpenSSL REQUIRED)
+find_package(Boost CONFIG REQUIRED COMPONENTS system date_time random)
+find_package(RapidJSON CONFIG REQUIRED)
+find_package(websocketpp CONFIG REQUIRED)
+
+
+
+
+option(BUILD_SHARED_LIBS "Build the shared library" OFF)
+
 
 aux_source_directory(${CMAKE_CURRENT_LIST_DIR}/src ALL_SRC)
 aux_source_directory(${CMAKE_CURRENT_LIST_DIR}/src/internal ALL_SRC)
-file(GLOB ALL_HEADERS ${CMAKE_CURRENT_LIST_DIR}/src/*.h )
+file(GLOB ALL_HEADERS ${CMAKE_CURRENT_LIST_DIR}/src/*.h)
 set(SIO_INCLUDEDIR ${CMAKE_CURRENT_LIST_DIR})
 
 add_library(sioclient ${ALL_SRC})
-target_include_directories(sioclient PRIVATE ${Boost_INCLUDE_DIRS} 
-    ${CMAKE_CURRENT_LIST_DIR}/src 
-    ${CMAKE_CURRENT_LIST_DIR}/lib/websocketpp 
-    ${CMAKE_CURRENT_LIST_DIR}/lib/rapidjson/include
-)
+target_include_directories(sioclient PRIVATE ${Boost_INCLUDE_DIRS}
+        ${CMAKE_CURRENT_LIST_DIR}/src
+        )
 
-set_property(TARGET sioclient PROPERTY CXX_STANDARD 11)
-set_property(TARGET sioclient PROPERTY CXX_STANDARD_REQUIRED ON)
-target_link_libraries(sioclient PRIVATE ${Boost_LIBRARIES})
-if(BUILD_SHARED_LIBS)
-set_target_properties(sioclient
-	PROPERTIES
-		SOVERSION ${MAJOR}
-		VERSION ${MAJOR}.${MINOR}.${PATCH}
-	)
-endif()
+target_link_libraries(sioclient PUBLIC RapidJSON::rapidjson)
+
+target_link_libraries(sioclient PUBLIC Boost::boost Boost::system Boost::date_time Boost::random)
+
+if (BUILD_SHARED_LIBS)
+    set_target_properties(sioclient
+            PROPERTIES
+            SOVERSION ${MAJOR}
+            VERSION ${MAJOR}.${MINOR}.${PATCH}
+            )
+endif ()
+
 list(APPEND TARGET_LIBRARIES sioclient)
 
-find_package(OpenSSL)
-if(OPENSSL_FOUND)
 add_library(sioclient_tls ${ALL_SRC})
-target_include_directories(sioclient_tls PRIVATE ${Boost_INCLUDE_DIRS} 
-    ${CMAKE_CURRENT_LIST_DIR}/src 
-    ${CMAKE_CURRENT_LIST_DIR}/lib/websocketpp 
-    ${CMAKE_CURRENT_LIST_DIR}/lib/rapidjson/include
-    ${OPENSSL_INCLUDE_DIR}
-)
-
-set_property(TARGET sioclient_tls PROPERTY CXX_STANDARD 11)
-set_property(TARGET sioclient_tls PROPERTY CXX_STANDARD_REQUIRED ON)
-target_link_libraries(sioclient_tls PRIVATE ${Boost_LIBRARIES} ${OPENSSL_LIBRARIES} )
+target_link_libraries(sioclient_tls PUBLIC OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(sioclient_tls PUBLIC Boost::boost Boost::system Boost::date_time Boost::random)
+target_link_libraries(sioclient_tls PUBLIC websocketpp::websocketpp)
 target_compile_definitions(sioclient_tls PRIVATE -DSIO_TLS)
-if(BUILD_SHARED_LIBS)
-set_target_properties(sioclient_tls
-	PROPERTIES
-		SOVERSION ${MAJOR}
-		VERSION ${MAJOR}.${MINOR}.${PATCH}
-	)
-endif()
+if (BUILD_SHARED_LIBS)
+    set_target_properties(sioclient_tls
+            PROPERTIES
+            SOVERSION ${MAJOR}
+            VERSION ${MAJOR}.${MINOR}.${PATCH}
+            )
+endif ()
 list(APPEND TARGET_LIBRARIES sioclient_tls)
 
-endif()
+#
+# installation
+#
 
-install(FILES ${ALL_HEADERS} 
-    DESTINATION "${CMAKE_CURRENT_LIST_DIR}/build/include"
-)
+set(include_install_dir "include")
+set(config_install_dir "lib/cmake/${PROJECT_NAME}")
+set(config_export_name "${PROJECT_NAME}Config")
+set(targets_export_name "${PROJECT_NAME}Targets")
+set(project_config "${CMAKE_CURRENT_BINARY_DIR}/${config_export_name}.cmake")
+set(version_config "${CMAKE_CURRENT_BINARY_DIR}/${config_export_name}Version.cmake")
+set(namespace "${PROJECT_NAME}::")
 
-install(TARGETS ${TARGET_LIBRARIES}
-    DESTINATION "${CMAKE_CURRENT_LIST_DIR}/build/lib/${CMAKE_BUILD_TYPE}"
-)
+include(CMakePackageConfigHelpers)
+configure_package_config_file( # Uses target_exports_name
+        "cmake/hunter.Config.cmake.in"
+        "${project_config}"
+        INSTALL_DESTINATION "${config_install_dir}"
+        )
+write_basic_package_version_file(
+        "${version_config}"
+        VERSION "${PROJECT_VERSION}"
+        COMPATIBILITY SameMajorVersion)
 
-install(FILES ${Boost_LIBRARIES} 
-    DESTINATION "${CMAKE_CURRENT_LIST_DIR}/build/lib/${CMAKE_BUILD_TYPE}"
-)
+install(TARGETS ${TARGET_LIBRARIES} DESTINATION lib
+        EXPORT ${targets_export_name}
+        INCLUDES DESTINATION "${include_install_dir}")
+
+install(
+        EXPORT "${targets_export_name}"
+        NAMESPACE "${namespace}"
+        DESTINATION "${config_install_dir}")
+
+install(FILES ${ALL_HEADERS}
+        DESTINATION include
+        )
+
+install(
+        FILES "${project_config}" "${version_config}"
+        DESTINATION "${config_install_dir}")
